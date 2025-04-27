@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "215991443448",
+    "project_id": "like2bikelogin",
+    "storage_bucket": "like2bikelogin.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:215991443448:android:ec89829476bfedfa62c00d",
+        "android_client_info": {
+          "package_name": "com.example.like2bike"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAYPHmItOe4u3mlckFW51n74maQZAxQMVk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
