@@ -10,6 +10,7 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.FirebaseFirestore;
 
 import java.util.HashMap;
@@ -51,31 +52,52 @@ public class RegisterActivity extends AppCompatActivity {
         String password = passwordEditText.getText().toString().trim();
 
         if (email.isEmpty() || username.isEmpty() || password.isEmpty()) {
-            Toast.makeText(this, "Please fill all fields", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Uzupełnij wszystkie pola", Toast.LENGTH_SHORT).show();
             return;
         }
 
         auth.createUserWithEmailAndPassword(email, password)
                 .addOnCompleteListener(task -> {
                     if (task.isSuccessful()) {
-                        String userId = auth.getCurrentUser().getUid();
-                        Map<String, Object> user = new HashMap<>();
-                        user.put("email", email);
-                        user.put("username", username);
+                        FirebaseUser firebaseUser = auth.getCurrentUser();
 
-                        db.collection("users").document(userId)
-                                .set(user)
-                                .addOnSuccessListener(aVoid -> {
-                                    auth.getCurrentUser().sendEmailVerification();
-                                    Toast.makeText(RegisterActivity.this, "Registration successful. Check your email!", Toast.LENGTH_SHORT).show();
-                                    startActivity(new Intent(RegisterActivity.this, LoginActivity.class));
-                                    finish();
-                                })
-                                .addOnFailureListener(e ->
-                                        Toast.makeText(RegisterActivity.this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show()
-                                );
+                        if (firebaseUser != null) {
+                            firebaseUser.sendEmailVerification()
+                                    .addOnCompleteListener(verificationTask -> {
+                                        if (verificationTask.isSuccessful()) {
+                                            // Komunikat o sukcesie ZANIM zapiszesz do Firestore
+                                            Toast.makeText(RegisterActivity.this, "Rejestracja udana. Sprawdź e-mail weryfikacyjny!", Toast.LENGTH_LONG).show();
+
+                                            // Zapisz dane użytkownika do Firestore
+                                            Map<String, Object> user = new HashMap<>();
+                                            user.put("email", email);
+                                            user.put("username", username);
+
+                                            db.collection("users").document(firebaseUser.getUid())
+                                                    .set(user)
+                                                    .addOnSuccessListener(aVoid -> {
+                                                        // Zakończ – wyloguj i przekieruj
+                                                        Intent intent = new Intent(RegisterActivity.this, LoginActivity.class);
+                                                        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+                                                        startActivity(intent);
+                                                        finish();
+                                                        auth.signOut();
+                                                    })
+                                                    .addOnFailureListener(e -> {
+                                                        Toast.makeText(RegisterActivity.this, "Nie zapisano danych: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                                                    });
+
+                                        } else {
+                                            String error = verificationTask.getException() != null
+                                                    ? verificationTask.getException().getMessage()
+                                                    : "Nieznany błąd weryfikacji";
+                                            Toast.makeText(RegisterActivity.this, "Nie udało się wysłać maila: " + error, Toast.LENGTH_LONG).show();
+                                        }
+                                    });
+                        }
+
                     } else {
-                        Toast.makeText(RegisterActivity.this, "Registration failed: " + task.getException().getMessage(), Toast.LENGTH_SHORT).show();
+                        Toast.makeText(RegisterActivity.this, "Rejestracja nie powiodła się: " + task.getException().getMessage(), Toast.LENGTH_LONG).show();
                     }
                 });
     }

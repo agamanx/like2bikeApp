@@ -12,6 +12,7 @@ import com.example.like2bike.R;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.FirebaseFirestore;
 
 public class LoginActivity extends AppCompatActivity {
@@ -65,10 +66,20 @@ public class LoginActivity extends AppCompatActivity {
                         auth.signInWithEmailAndPassword(email, password)
                                 .addOnCompleteListener(task -> {
                                     if (task.isSuccessful()) {
-                                        Toast.makeText(LoginActivity.this, "Login successful", Toast.LENGTH_SHORT).show();
-                                        // Tutaj możesz zrobić startActivity(new Intent(this, MainActivity.class));
+                                        FirebaseUser user = auth.getCurrentUser();
+                                        if (user != null && user.isEmailVerified()) {
+                                            // Email zweryfikowany – przejście dalej
+                                            Toast.makeText(LoginActivity.this, "Zalogowano pomyślnie", Toast.LENGTH_SHORT).show();
+                                            Intent intent = new Intent(LoginActivity.this, MainActivity.class); // lub inna
+                                            startActivity(intent);
+                                            finish();
+                                        } else {
+                                            // Email NIEZWERYFIKOWANY
+                                            Toast.makeText(LoginActivity.this, "Potwierdź swój adres e-mail przed logowaniem.", Toast.LENGTH_LONG).show();
+                                            auth.signOut(); // Wyloguj, żeby nie trzymało sesji
+                                        }
                                     } else {
-                                        Toast.makeText(LoginActivity.this, "Login failed: " + task.getException().getMessage(), Toast.LENGTH_SHORT).show();
+                                        Toast.makeText(LoginActivity.this, "Logowanie nie powiodło się: " + task.getException().getMessage(), Toast.LENGTH_LONG).show();
                                     }
                                 });
                     }
