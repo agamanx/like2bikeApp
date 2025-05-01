@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Like2Bike</string>
+    <string name="open_drawer">Otwórz menu</string>
+    <string name="close_drawer">Zamknij menu</string>
 </resources>
