@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -69,6 +70,7 @@ public class MainActivity extends AppCompatActivity
         speedTv.setText("18");
         distanceTv.setText("2.3");
         caloriesTv.setText("75");
+
     }
 
     /* ===== nawigacja w Drawerze ===== */
@@ -77,9 +79,15 @@ public class MainActivity extends AppCompatActivity
         int id = item.getItemId();
 
         if (id == R.id.nav_connect) {
-            startActivity(new Intent(this, ConnectActivity.class));   // ekran parowania BT / BLE
+            startActivity(new Intent(this, ConnectActivity.class));
         } else if (id == R.id.nav_profile) {
             startActivity(new Intent(this, ProfileActivity.class));
+        } else if (id == R.id.nav_route) {
+            // Otwórz mapę z trasą po kliknięciu w menu
+            startActivity(new Intent(this, RouteActivity.class));
+
+        } else if (id == R.id.nav_challenge) {
+            startActivity(new Intent(this, ChallengeActivity.class));
         } else if (id == R.id.nav_logout) {
             auth.signOut();
             Intent i = new Intent(this, LoginActivity.class);

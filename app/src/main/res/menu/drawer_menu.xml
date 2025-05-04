@@ -5,4 +5,11 @@
         android:title="Profil użytkownika" />
     <item android:id="@+id/nav_logout"
         android:title="Wyloguj" />
+    <item
+        android:id="@+id/nav_route"
+        android:title="Mapa trasy" />
+    <item
+        android:id="@+id/nav_challenge"
+        android:title="Dzienne wyzwanie" />
+
 </menu>
