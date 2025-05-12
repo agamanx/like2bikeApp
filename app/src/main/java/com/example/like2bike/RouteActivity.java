@@ -1,14 +1,16 @@
 package com.example.like2bike;
 
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.location.Location;
 import android.os.Bundle;
 import android.widget.Toast;
 import android.widget.Button;
 
-
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
 
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
@@ -38,6 +40,8 @@ import okhttp3.Response;
 
 public class RouteActivity extends AppCompatActivity implements OnMapReadyCallback {
 
+    private static final int LOCATION_PERMISSION_REQUEST_CODE = 1001;
+
     private GoogleMap mMap;
     private FusedLocationProviderClient fusedLocationClient;
     private LatLng destination = new LatLng(52.2297, 21.0122); // PRZYKŁAD: Warszawa centrum
@@ -51,38 +55,74 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
 
-        mapFragment.getMapAsync(this);
+        if (mapFragment != null) {
+            mapFragment.getMapAsync(this);
+        }
+
         Button backButton = findViewById(R.id.back_to_main_button);
-        backButton.setOnClickListener(v -> {
-            finish(); // wraca do poprzedniego ekranu (MainActivity)
-        });
+        backButton.setOnClickListener(v -> finish());
     }
 
     @Override
     public void onMapReady(@NonNull GoogleMap googleMap) {
         mMap = googleMap;
+        requestLocation();
+    }
 
-        // Sprawdź lokalizację użytkownika
+    private void requestLocation() {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            // Poproś o zgodę
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                    },
+                    LOCATION_PERMISSION_REQUEST_CODE);
+            return;
+        }
+
+        mMap.setMyLocationEnabled(true);
+
         Task<Location> locationTask = fusedLocationClient.getLastLocation();
-        locationTask.addOnSuccessListener(this, new OnSuccessListener<Location>() {
-            @Override
-            public void onSuccess(Location location) {
-                if (location != null) {
-                    LatLng userLocation = new LatLng(location.getLatitude(), location.getLongitude());
-                    mMap.addMarker(new MarkerOptions().position(userLocation).title("Twoja lokalizacja"));
-                    mMap.addMarker(new MarkerOptions().position(destination).title("Cel"));
-                    mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(userLocation, 14));
+        locationTask.addOnSuccessListener(this, location -> {
+            if (location != null) {
+                LatLng userLocation = new LatLng(location.getLatitude(), location.getLongitude());
+                mMap.addMarker(new MarkerOptions().position(userLocation).title("Twoja lokalizacja"));
+                mMap.addMarker(new MarkerOptions().position(destination).title("Cel"));
+                mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(userLocation, 14));
 
-                    // Wyznacz trasę tutaj – można użyć zewnętrznego API jak Directions API
-                    // np. wywołać HTTP request i narysować linię Polyline
-                    drawRoute(userLocation, destination);
-                }
+                drawRoute(userLocation, destination);
+            } else {
+                Toast.makeText(this, "Nie udało się uzyskać lokalizacji", Toast.LENGTH_SHORT).show();
             }
         });
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+                                           @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
+            boolean granted = false;
+            for(int result : grantResults) {
+                if (result == PackageManager.PERMISSION_GRANTED) {
+                    granted = true;
+                    break;
+                }
+            }
+            if (granted) {
+                requestLocation();
+        } else {
+            Toast.makeText(this, "Brak dostępu do lokalizacji", Toast.LENGTH_SHORT).show();
+        }
+    }
+}
+
+
+
     private void drawRoute(LatLng origin, LatLng destination) {
-        String apiKey = "AIzaSyC0yyTYKphSGySu4BEiTiPIPQU5QNBZ5IE";
+        String apiKey = "AIzaSyC0yyTYKphSGySu4BEiTiPIPQU5QNBZ5IE"; // pamiętaj, by nie zostawiać klucza API w kodzie produkcyjnym
         String url = "https://maps.googleapis.com/maps/api/directions/json?" +
                 "origin=" + origin.latitude + "," + origin.longitude +
                 "&destination=" + destination.latitude + "," + destination.longitude +
@@ -148,10 +188,9 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
             int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
             lng += dlng;
 
-            poly.add(new LatLng((lat / 1E5), (lng / 1E5)));
+            poly.add(new LatLng(lat / 1E5, lng / 1E5));
         }
 
         return poly;
     }
-
 }
