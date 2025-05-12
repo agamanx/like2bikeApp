@@ -4,7 +4,6 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
-import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
@@ -20,7 +19,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.util.Log;
 
-import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.core.app.NotificationCompat;
 
 import java.util.UUID;
@@ -45,12 +44,9 @@ public class BLEForegroundService extends Service {
     }
 
     private Notification createNotification(String content) {
-        NotificationChannel channel = null;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            channel = new NotificationChannel("ble_channel", "BLE Notifications", NotificationManager.IMPORTANCE_LOW);
-        }
-        NotificationManager manager = getSystemService(NotificationManager.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel("ble_channel", "BLE Notifications", NotificationManager.IMPORTANCE_LOW);
+            NotificationManager manager = getSystemService(NotificationManager.class);
             manager.createNotificationChannel(channel);
         }
 
@@ -62,14 +58,8 @@ public class BLEForegroundService extends Service {
     }
 
     private void connectToDevice() {
-        if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            // TODO: Consider calling
-            //    ActivityCompat#requestPermissions
-            // here to request the missing permissions, and then overriding
-            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-            //                                          int[] grantResults)
-            // to handle the case where the user grants the permission. See the documentation
-            // for ActivityCompat#requestPermissions for more details.
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            Log.w("BLEService", "Brak uprawnień do BLUETOOTH_CONNECT");
             return;
         }
         bluetoothGatt = device.connectGatt(this, false, gattCallback);
@@ -79,16 +69,8 @@ public class BLEForegroundService extends Service {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                    // TODO: Consider calling
-                    //    ActivityCompat#requestPermissions
-                    // here to request the missing permissions, and then overriding
-                    //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                    //                                          int[] grantResults)
-                    // to handle the case where the user grants the permission. See the documentation
-                    // for ActivityCompat#requestPermissions for more details.
+                if (ContextCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)
                     return;
-                }
                 gatt.discoverServices();
             }
         }
@@ -98,16 +80,9 @@ public class BLEForegroundService extends Service {
             BluetoothGattService service = gatt.getService(UUID.fromString(SERVICE_UUID));
             if (service != null) {
                 characteristic = service.getCharacteristic(UUID.fromString(CHARACTERISTIC_UUID));
-                if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                    // TODO: Consider calling
-                    //    ActivityCompat#requestPermissions
-                    // here to request the missing permissions, and then overriding
-                    //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                    //                                          int[] grantResults)
-                    // to handle the case where the user grants the permission. See the documentation
-                    // for ActivityCompat#requestPermissions for more details.
+                if (ContextCompat.checkSelfPermission(getApplicationContext(), android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)
                     return;
-                }
+
                 gatt.setCharacteristicNotification(characteristic, true);
 
                 BluetoothGattDescriptor descriptor = characteristic.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"));
@@ -127,16 +102,13 @@ public class BLEForegroundService extends Service {
 
     private void handleBLEMessage(String msg) {
         if (msg.contains("Prędkość średnia")) {
-            // Możesz użyć Broadcast lub EventBus do przesłania danych do aktywności
+            // Można użyć Broadcast lub innego mechanizmu komunikacji
         } else if (msg.contains("Tilt detected")) {
-            // Uruchom ekran potwierdzenia wypadku
             Intent intent = new Intent(this, AccidentActivity.class);
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
 
-            // Jeżeli użytkownik nie zareaguje w 15s – wysyłamy SMS z lokalizacją
             tiltTimeoutRunnable = () -> {
-                // sprawdź czy użytkownik potwierdził – jeśli nie:
                 sendAccidentSMS();
             };
             tiltHandler.postDelayed(tiltTimeoutRunnable, 15000);
@@ -144,8 +116,8 @@ public class BLEForegroundService extends Service {
     }
 
     private void sendAccidentSMS() {
-        // dodaj kod lokalizacji + wysyłka SMS
         Log.d("BLEService", "Wysyłanie wiadomości o wypadku...");
+        // TODO: dodaj obsługę lokalizacji i SMS
     }
 
     @Override
@@ -153,4 +125,3 @@ public class BLEForegroundService extends Service {
         return null;
     }
 }
-
