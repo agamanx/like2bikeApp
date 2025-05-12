@@ -1,14 +1,26 @@
 package com.example.like2bike;
 
+import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.view.MenuItem;
-import android.view.View;
-import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothManager;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanResult;
+
+import java.util.UUID;
+
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.ActionBarDrawerToggle;
@@ -27,14 +39,21 @@ import java.util.List;
 public class MainActivity extends AppCompatActivity
         implements NavigationView.OnNavigationItemSelectedListener {
 
-    // UI
+    private BluetoothAdapter bluetoothAdapter;
+    private BluetoothGatt bluetoothGatt;
+
+    private final UUID SERVICE_UUID = UUID.fromString("12345678-1234-1234-1234-123456789abc");
+    private final UUID CHARACTERISTIC_UUID = UUID.fromString("0000abcd-0000-1000-8000-00805f9b34fb");
     private DrawerLayout drawerLayout;
     private NavigationView navigationView;
     private ImageButton menuButton, leftSignal, rightSignal, emergency;
     private TextView speedTv, distanceTv, caloriesTv;
     private static final int PERMISSION_REQUEST_CODE = 100;
+    private long lastSpeedUpdateTime = 0;
+    private float totalDistanceMeters = 0;
+    private float totalCalories = 0;
+    private float lastSpeed = 0;
 
-    // Firebase (np. do profilu / wylogowania)
     private FirebaseAuth auth;
 
     @Override
@@ -43,10 +62,8 @@ public class MainActivity extends AppCompatActivity
         setContentView(R.layout.activity_main);
 
         checkAndRequestPermissions();
-
         auth = FirebaseAuth.getInstance();
 
-        // ------ init UI -------
         drawerLayout = findViewById(R.id.drawer_layout);
         navigationView = findViewById(R.id.navigation_view);
         menuButton     = findViewById(R.id.menu_button);
@@ -57,7 +74,8 @@ public class MainActivity extends AppCompatActivity
         distanceTv     = findViewById(R.id.distance_value);
         caloriesTv     = findViewById(R.id.calories_value);
 
-        // Drawer toggle (hamburger animacja)
+        initBLE();
+
         ActionBarDrawerToggle toggle = new ActionBarDrawerToggle(
                 this, drawerLayout, R.string.open_drawer, R.string.close_drawer);
         drawerLayout.addDrawerListener(toggle);
@@ -65,24 +83,18 @@ public class MainActivity extends AppCompatActivity
 
         navigationView.setNavigationItemSelectedListener(this);
 
-        // Otwieramy drawer własnym przyciskiem
         menuButton.setOnClickListener(v ->
                 drawerLayout.openDrawer(GravityCompat.START));
 
-        // ---- obsługa przycisków kierunkowskazów ----
         leftSignal.setOnClickListener(v -> sendSignalToController("LEFT"));
         rightSignal.setOnClickListener(v -> sendSignalToController("RIGHT"));
         emergency.setOnClickListener(v -> sendSignalToController("HAZARD"));
 
-        // >>> tutaj w prawdziwej aplikacji podłączysz odczyty prędkości itd.
-        // przykładowe wartości demo
         speedTv.setText("18");
         distanceTv.setText("2.3");
         caloriesTv.setText("75");
-
     }
 
-    /* ===== nawigacja w Drawerze ===== */
     @Override
     public boolean onNavigationItemSelected(@NonNull MenuItem item) {
         int id = item.getItemId();
@@ -92,9 +104,7 @@ public class MainActivity extends AppCompatActivity
         } else if (id == R.id.nav_profile) {
             startActivity(new Intent(this, ProfileActivity.class));
         } else if (id == R.id.nav_route) {
-            // Otwórz mapę z trasą po kliknięciu w menu
             startActivity(new Intent(this, RouteActivity.class));
-
         } else if (id == R.id.nav_challenge) {
             startActivity(new Intent(this, ChallengeActivity.class));
         } else if (id == R.id.nav_logout) {
@@ -109,14 +119,10 @@ public class MainActivity extends AppCompatActivity
         return true;
     }
 
-    /* ===== wysyłanie komendy do mikrokontrolera  ===== */
     private void sendSignalToController(String command) {
-        // tu dodasz właściwe API Bluetooth / Wi‑Fi
-        // na razie tylko Toast
         Toast.makeText(this, "Wysłano: " + command, Toast.LENGTH_SHORT).show();
     }
 
-    /* ===== obsługa przycisku wstecz żeby zamykać drawer ===== */
     @Override
     public void onBackPressed() {
         if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
@@ -137,6 +143,30 @@ public class MainActivity extends AppCompatActivity
             permissionsNeeded.add(Manifest.permission.ACCESS_FINE_LOCATION);
         }
 
+        // Sprawdzanie uprawnienia do Bluetooth
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
+            permissionsNeeded.add(Manifest.permission.BLUETOOTH);
+        }
+
+        // Sprawdzanie uprawnienia do Bluetooth Admin
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED) {
+            permissionsNeeded.add(Manifest.permission.BLUETOOTH_ADMIN);
+        }
+
+        // Sprawdzanie uprawnień Bluetooth, od wersji Androida 12 (API 31) wymagane jest dodatkowo uprawnienie BLUETOOTH_CONNECT
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                permissionsNeeded.add(Manifest.permission.BLUETOOTH_CONNECT);
+            }
+        }
+
+        // Sprawdzanie uprawnień Bluetooth Scan, od wersji Androida 12 (API 31) wymagane jest dodatkowe uprawnienie BLUETOOTH_SCAN
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                permissionsNeeded.add(Manifest.permission.BLUETOOTH_SCAN);
+            }
+        }
+
         if (!permissionsNeeded.isEmpty()) {
             ActivityCompat.requestPermissions(this,
                     permissionsNeeded.toArray(new String[0]),
@@ -149,11 +179,142 @@ public class MainActivity extends AppCompatActivity
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
 
         if (requestCode == PERMISSION_REQUEST_CODE) {
-            for (int i = 0; i < permissions.length; i++) {
-                if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
-                    Toast.makeText(this, "Brak wymaganych uprawnień: " + permissions[i], Toast.LENGTH_LONG).show();
+            boolean allGranted = true;
+
+            for (int result : grantResults) {
+                if (result != PackageManager.PERMISSION_GRANTED) {
+                    allGranted = false;
+                    break;
                 }
+            }
+
+            if (!allGranted) {
+                Toast.makeText(this, "Nie przyznano wymaganych uprawnień – aplikacja może działać nieprawidłowo", Toast.LENGTH_LONG).show();
             }
         }
     }
+
+    private void initBLE() {
+        // Sprawdzanie uprawnień przed rozpoczęciem skanowania
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+
+            // Jeśli uprawnienia nie zostały przyznane, zapisz to w logu lub wyświetl komunikat
+            Toast.makeText(this, "Brak uprawnień do skanowania urządzeń Bluetooth", Toast.LENGTH_SHORT).show();
+            return; // Przerwij działanie metody, jeśli brak uprawnień
+        }
+
+        BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
+        bluetoothAdapter = bluetoothManager.getAdapter();
+
+        if (bluetoothAdapter != null && bluetoothAdapter.isEnabled()) {
+            bluetoothAdapter.getBluetoothLeScanner().startScan(scanCallback);
+        } else {
+            Toast.makeText(this, "Bluetooth wyłączony", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private final ScanCallback scanCallback = new ScanCallback() {
+        @Override
+        public void onScanResult(int callbackType, ScanResult result) {
+            BluetoothDevice device = result.getDevice();
+
+            // Sprawdzamy uprawnienia przed uzyskaniem dostępu do nazwy urządzenia
+            if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(MainActivity.this, "Brak uprawnień do połączenia z urządzeniem Bluetooth", Toast.LENGTH_SHORT).show();
+                return; // Przerywamy działanie, jeśli brak uprawnień
+            }
+
+            if (device.getName() != null && device.getName().contains("ESP32_Module")) {
+                // Sprawdzamy uprawnienia przed połączeniem
+                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                    Toast.makeText(MainActivity.this, "Brak uprawnień do połączenia z urządzeniem Bluetooth", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                bluetoothAdapter.getBluetoothLeScanner().stopScan(this);
+
+                // Sprawdzamy uprawnienia przed połączeniem z urządzeniem
+                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                    Toast.makeText(MainActivity.this, "Brak uprawnień do połączenia Bluetooth", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                device.connectGatt(MainActivity.this, false, gattCallback);
+            }
+        }
+    };
+
+    private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
+        @Override
+        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
+                // Sprawdzamy uprawnienia przed wywołaniem discoverServices
+                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                    Toast.makeText(MainActivity.this, "Brak uprawnień do komunikacji z urządzeniem Bluetooth", Toast.LENGTH_SHORT).show();
+                    return; // Przerywamy operację, jeśli brak uprawnień
+                }
+
+                gatt.discoverServices();
+            }
+        }
+
+        @Override
+        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+            BluetoothGattService service = gatt.getService(SERVICE_UUID);
+            if (service != null) {
+                BluetoothGattCharacteristic characteristic = service.getCharacteristic(CHARACTERISTIC_UUID);
+
+                // Sprawdzamy uprawnienia przed ustawieniem powiadomienia
+                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                    Toast.makeText(MainActivity.this, "Brak uprawnień do ustawiania powiadomień Bluetooth", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                gatt.setCharacteristicNotification(characteristic, true);
+            }
+        }
+
+        @Override
+        public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+            String value = characteristic.getStringValue(0);
+            runOnUiThread(() -> {
+                if (value.contains("Prędkość")) {
+                    // Parsowanie liczby z tekstu np. "Prędkość średnia: 3.25 m/s"
+                    String[] parts = value.split(":");
+                    if (parts.length > 1) {
+                        String speedStr = parts[1].replaceAll("[^0-9.,]", "").replace(",", ".").trim();
+                        try {
+                            float currentSpeed = Float.parseFloat(speedStr);
+                            speedTv.setText(String.format("%.2f", currentSpeed));
+
+                            // Czas od ostatniego odczytu
+                            long currentTime = System.currentTimeMillis();
+                            if (lastSpeedUpdateTime != 0) {
+                                float deltaTimeSec = (currentTime - lastSpeedUpdateTime) / 1000f;
+
+                                // Oblicz dystans (v * t)
+                                totalDistanceMeters += currentSpeed * deltaTimeSec;
+
+                                // Prosta kalkulacja kalorii: 0.2 kcal na 1 metr przy 3 m/s (~10.8 km/h)
+                                totalCalories += (0.2f * currentSpeed * deltaTimeSec);  // możesz to dostroić
+                            }
+
+                            lastSpeedUpdateTime = currentTime;
+                            lastSpeed = currentSpeed;
+
+                            distanceTv.setText(String.format("%.2f", totalDistanceMeters / 1000)); // w km
+                            caloriesTv.setText(String.format("%.0f", totalCalories)); // zaokrąglone
+
+                        } catch (NumberFormatException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+            });
+        }
+    };
+
+
+
 }

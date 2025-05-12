@@ -44,6 +44,9 @@ dependencies {
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
 
+    implementation("no.nordicsemi.android.support.v18:scanner:1.6.0")
+
+
     // Import the Firebase BoM
     implementation(platform("com.google.firebase:firebase-bom:33.13.0"))
 

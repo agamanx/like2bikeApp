@@ -17,7 +17,14 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.telephony.SmsManager;
 import android.util.Log;
+import android.location.Location;
+import android.location.LocationManager;
+import android.location.LocationListener;
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.tasks.OnSuccessListener;
 
 import androidx.core.content.ContextCompat;
 import androidx.core.app.NotificationCompat;
@@ -27,6 +34,8 @@ import java.util.UUID;
 public class BLEForegroundService extends Service {
 
     private BluetoothGatt bluetoothGatt;
+    private FusedLocationProviderClient fusedLocationClient;
+
     private BluetoothDevice device;
     private BluetoothGattCharacteristic characteristic;
     private final String SERVICE_UUID = "12345678-1234-1234-1234-123456789abc";
@@ -40,6 +49,7 @@ public class BLEForegroundService extends Service {
         device = intent.getParcelableExtra("bleDevice");
         startForeground(1, createNotification("Łączenie z urządzeniem..."));
         connectToDevice();
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
         return START_STICKY;
     }
 
@@ -116,8 +126,29 @@ public class BLEForegroundService extends Service {
     }
 
     private void sendAccidentSMS() {
-        Log.d("BLEService", "Wysyłanie wiadomości o wypadku...");
-        // TODO: dodaj obsługę lokalizacji i SMS
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(this, android.Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+            Log.e("BLEService", "Brak wymaganych uprawnień (lokalizacja lub SMS)");
+            return;
+        }
+
+        fusedLocationClient.getLastLocation().addOnSuccessListener(location -> {
+            if (location != null) {
+                double lat = location.getLatitude();
+                double lon = location.getLongitude();
+                String message = "Wykryto możliwy wypadek! Lokalizacja: https://maps.google.com/?q=" + lat + "," + lon;
+
+                sendSMS("123456789", message);  // <- Podmień numer!
+            } else {
+                Log.w("BLEService", "Nie udało się pobrać lokalizacji");
+            }
+        });
+    }
+
+    private void sendSMS(String number, String message) {
+        SmsManager sms = SmsManager.getDefault();
+        sms.sendTextMessage(number, null, message, null, null);
+        Log.d("BLEService", "Wysłano SMS: " + message);
     }
 
     @Override
