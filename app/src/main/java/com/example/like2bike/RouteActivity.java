@@ -1,6 +1,7 @@
 package com.example.like2bike;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.location.Location;
@@ -13,7 +14,11 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 
 import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.Priority;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
@@ -44,7 +49,10 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
     private GoogleMap mMap;
     private FusedLocationProviderClient fusedLocationClient;
-    private LatLng destination = new LatLng(52.2297, 21.0122); // PRZYKŁAD: Warszawa centrum
+    private LocationCallback locationCallback;
+
+    private List<Location> locationHistory = new ArrayList<>();
+    private float totalDistance = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -82,19 +90,49 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
         mMap.setMyLocationEnabled(true);
 
-        Task<Location> locationTask = fusedLocationClient.getLastLocation();
-        locationTask.addOnSuccessListener(this, location -> {
-            if (location != null) {
-                LatLng userLocation = new LatLng(location.getLatitude(), location.getLongitude());
-                mMap.addMarker(new MarkerOptions().position(userLocation).title("Twoja lokalizacja"));
-                mMap.addMarker(new MarkerOptions().position(destination).title("Cel"));
-                mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(userLocation, 14));
+        LocationRequest locationRequest = LocationRequest.create()
+                .setInterval(5000)
+                .setFastestInterval(3000)
+                .setPriority(Priority.PRIORITY_HIGH_ACCURACY);
 
-                drawRoute(userLocation, destination);
-            } else {
-                Toast.makeText(this, "Nie udało się uzyskać lokalizacji", Toast.LENGTH_SHORT).show();
+        locationCallback = new LocationCallback() {
+            @Override
+            public void onLocationResult(LocationResult locationResult) {
+                if (locationResult == null) return;
+                for (Location location : locationResult.getLocations()) {
+                    updateDistance(location);
+                }
             }
-        });
+        };
+
+        fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, null);
+    }
+
+    private void updateDistance(Location newLocation) {
+        if (locationHistory.size() > 0) {
+            Location lastLocation = locationHistory.get(locationHistory.size() - 1);
+            float distance = lastLocation.distanceTo(newLocation); // w metrach
+            totalDistance += distance;
+
+            // Wysyłamy dystans do ChallengeActivity
+            sendDistanceToChallenge(totalDistance);
+        }
+        locationHistory.add(newLocation);
+    }
+
+    private void sendDistanceToChallenge(float distance) {
+        Intent intent = new Intent("DISTANCE_UPDATE");
+        intent.setPackage(getPackageName()); // 👈 dodaje nazwę pakietu, ograniczając zasięg
+        intent.putExtra("distance", distance);
+        sendBroadcast(intent);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (fusedLocationClient != null && locationCallback != null) {
+            fusedLocationClient.removeLocationUpdates(locationCallback);
+        }
     }
 
     @Override
@@ -105,7 +143,7 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
 
         if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
             boolean granted = false;
-            for(int result : grantResults) {
+            for (int result : grantResults) {
                 if (result == PackageManager.PERMISSION_GRANTED) {
                     granted = true;
                     break;
@@ -113,84 +151,10 @@ public class RouteActivity extends AppCompatActivity implements OnMapReadyCallba
             }
             if (granted) {
                 requestLocation();
-        } else {
-            Toast.makeText(this, "Brak dostępu do lokalizacji", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Brak dostępu do lokalizacji", Toast.LENGTH_SHORT).show();
+            }
         }
     }
 }
 
-
-
-    private void drawRoute(LatLng origin, LatLng destination) {
-        String apiKey = "AIzaSyC0yyTYKphSGySu4BEiTiPIPQU5QNBZ5IE"; // pamiętaj, by nie zostawiać klucza API w kodzie produkcyjnym
-        String url = "https://maps.googleapis.com/maps/api/directions/json?" +
-                "origin=" + origin.latitude + "," + origin.longitude +
-                "&destination=" + destination.latitude + "," + destination.longitude +
-                "&mode=bicycling" +
-                "&key=" + apiKey;
-
-        OkHttpClient client = new OkHttpClient();
-        Request request = new Request.Builder().url(url).build();
-
-        client.newCall(request).enqueue(new Callback() {
-            @Override
-            public void onFailure(@NonNull Call call, @NonNull IOException e) {
-                e.printStackTrace();
-            }
-
-            @Override
-            public void onResponse(@NonNull Call call, @NonNull Response response) throws IOException {
-                if (response.isSuccessful() && response.body() != null) {
-                    String json = response.body().string();
-                    try {
-                        JSONObject root = new JSONObject(json);
-                        JSONArray routes = root.getJSONArray("routes");
-                        if (routes.length() > 0) {
-                            JSONObject route = routes.getJSONObject(0);
-                            JSONObject overviewPolyline = route.getJSONObject("overview_polyline");
-                            String points = overviewPolyline.getString("points");
-                            List<LatLng> decodedPath = decodePolyline(points);
-
-                            runOnUiThread(() -> {
-                                mMap.addPolyline(new PolylineOptions().addAll(decodedPath).color(Color.BLUE));
-                            });
-                        }
-                    } catch (JSONException e) {
-                        e.printStackTrace();
-                    }
-                }
-            }
-        });
-    }
-
-    private List<LatLng> decodePolyline(String encoded) {
-        List<LatLng> poly = new ArrayList<>();
-        int index = 0, len = encoded.length();
-        int lat = 0, lng = 0;
-
-        while (index < len) {
-            int b, shift = 0, result = 0;
-            do {
-                b = encoded.charAt(index++) - 63;
-                result |= (b & 0x1f) << shift;
-                shift += 5;
-            } while (b >= 0x20);
-            int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-            lat += dlat;
-
-            shift = 0;
-            result = 0;
-            do {
-                b = encoded.charAt(index++) - 63;
-                result |= (b & 0x1f) << shift;
-                shift += 5;
-            } while (b >= 0x20);
-            int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-            lng += dlng;
-
-            poly.add(new LatLng(lat / 1E5, lng / 1E5));
-        }
-
-        return poly;
-    }
-}

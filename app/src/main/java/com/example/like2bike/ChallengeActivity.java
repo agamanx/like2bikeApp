@@ -1,5 +1,9 @@
 package com.example.like2bike;
 
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Bundle;
 import android.widget.TextView;
 import android.widget.Button;
@@ -13,6 +17,15 @@ public class ChallengeActivity extends AppCompatActivity {
     private ProgressBar challengeProgressBar;
     private TextView challengeTextView;
     private TextView progressTextView;
+
+    private final BroadcastReceiver distanceReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            float distance = intent.getFloatExtra("distance", 0);
+            currentChallenge.updateProgress(distance);
+            updateChallengeUI(distance);
+        }
+    };
 
     // Przykładowe wyzwania
     private Challenge[] challenges = {
@@ -39,9 +52,16 @@ public class ChallengeActivity extends AppCompatActivity {
         challengeProgressBar.setMax((int) currentChallenge.getGoal());
 
         backButton.setOnClickListener(v -> finish()); // Powrót do MainActivity
+    }
 
-        // Zaktualizuj progress, jeśli mamy dane o prędkości/dystansie
-        updateChallengeProgress();
+    private void updateChallengeUI(float progress) {
+        float goal = currentChallenge.getGoal();
+        progressTextView.setText(String.format("Postęp: %.2f / %.2f km", progress / 1000, goal / 1000));
+        challengeProgressBar.setProgress((int) progress);
+
+        if (currentChallenge.isCompleted()) {
+            challengeTextView.setText("🎉 Gratulacje! Ukończyłeś wyzwanie!");
+        }
     }
 
     // Ta metoda będzie aktualizować postęp wyzwania w zależności od zmieniającego się dystansu
@@ -60,5 +80,17 @@ public class ChallengeActivity extends AppCompatActivity {
         if (currentChallenge.isCompleted()) {
             challengeTextView.setText("Gratulacje! Ukończyłeś wyzwanie!");
         }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        registerReceiver(distanceReceiver, new IntentFilter("DISTANCE_UPDATE"),Context.RECEIVER_NOT_EXPORTED);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        unregisterReceiver(distanceReceiver);
     }
 }
