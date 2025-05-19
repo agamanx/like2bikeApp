@@ -1,9 +1,12 @@
 package com.example.like2bike;
 
 import android.Manifest;
+import android.bluetooth.BluetoothGattDescriptor;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.location.Location;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.MenuItem;
 import android.widget.ImageButton;
 import android.widget.TextView;
@@ -23,6 +26,7 @@ import java.util.UUID;
 
 
 import androidx.annotation.NonNull;
+import androidx.annotation.RequiresPermission;
 import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -30,6 +34,12 @@ import androidx.core.content.ContextCompat;
 import androidx.core.view.GravityCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.Priority;
 import com.google.android.material.navigation.NavigationView;
 import com.google.firebase.auth.FirebaseAuth;
 
@@ -40,7 +50,10 @@ public class MainActivity extends AppCompatActivity
         implements NavigationView.OnNavigationItemSelectedListener {
 
     private BluetoothAdapter bluetoothAdapter;
-    private BluetoothGatt bluetoothGatt;
+
+    private FusedLocationProviderClient fusedLocationClient;
+    private LocationCallback locationCallback;
+    private List<Location> locationHistory = new ArrayList<>();
 
     private final UUID SERVICE_UUID = UUID.fromString("12345678-1234-1234-1234-123456789abc");
     private final UUID CHARACTERISTIC_UUID = UUID.fromString("0000abcd-0000-1000-8000-00805f9b34fb");
@@ -56,6 +69,7 @@ public class MainActivity extends AppCompatActivity
 
     private FirebaseAuth auth;
 
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -76,6 +90,9 @@ public class MainActivity extends AppCompatActivity
 
         initBLE();
 
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
+        startLocationUpdates();
+
         ActionBarDrawerToggle toggle = new ActionBarDrawerToggle(
                 this, drawerLayout, R.string.open_drawer, R.string.close_drawer);
         drawerLayout.addDrawerListener(toggle);
@@ -90,9 +107,26 @@ public class MainActivity extends AppCompatActivity
         rightSignal.setOnClickListener(v -> sendSignalToController("RIGHT"));
         emergency.setOnClickListener(v -> sendSignalToController("HAZARD"));
 
-        speedTv.setText("18");
-        distanceTv.setText("2.3");
-        caloriesTv.setText("75");
+        speedTv.setText("0");
+        distanceTv.setText("0");
+        caloriesTv.setText("0");
+
+        BluetoothGatt gatt = BleManager.getInstance().getGatt();
+        BluetoothGattCharacteristic chara = BleManager.getInstance().getWriteCharacteristic();
+
+        if (gatt != null && chara != null) {
+            gatt.setCharacteristicNotification(chara, true);
+            BluetoothGattDescriptor descriptor = chara.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"));
+            if (descriptor != null) {
+                descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                gatt.writeDescriptor(descriptor);
+            }
+        }
+        BluetoothGattCallback callback = BleManager.getInstance().getGattCallback();
+        if (callback != null && gatt != null) {
+            // Połączenie jest już aktywne, nie trzeba się łączyć ponownie
+            Log.d("BLE", "Callback już ustawiony.");
+        }
     }
 
     @Override
@@ -120,7 +154,27 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void sendSignalToController(String command) {
-        Toast.makeText(this, "Wysłano: " + command, Toast.LENGTH_SHORT).show();
+        if (BleManager.getInstance().getGatt() == null || BleManager.getInstance().getWriteCharacteristic() == null) {
+            Toast.makeText(this, "Brak połączenia BLE – przejdź do 'Połącz'", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        boolean success = false;
+        try {
+            success = BleManager.getInstance().sendCommand(command);
+        } catch (SecurityException e) {
+            Toast.makeText(this, "Brak uprawnień Bluetooth (SecurityException)", Toast.LENGTH_SHORT).show();
+            e.printStackTrace();
+        } catch (Exception e) {
+            Toast.makeText(this, "Błąd podczas wysyłania komendy: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            e.printStackTrace();
+        }
+
+        if (success) {
+            Toast.makeText(this, "Wysłano komendę: " + command, Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "Błąd wysyłania komendy: " + command, Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override
@@ -314,6 +368,62 @@ public class MainActivity extends AppCompatActivity
             });
         }
     };
+
+    private void startLocationUpdates() {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
+                    PERMISSION_REQUEST_CODE);
+            return;
+        }
+
+        LocationRequest locationRequest = LocationRequest.create()
+                .setInterval(3000)
+                .setFastestInterval(2000)
+                .setPriority(Priority.PRIORITY_HIGH_ACCURACY);
+
+        locationCallback = new LocationCallback() {
+            @Override
+            public void onLocationResult(LocationResult locationResult) {
+                if (locationResult == null) return;
+
+                for (Location location : locationResult.getLocations()) {
+                    updateSpeedAndDistance(location);
+                }
+            }
+        };
+
+        fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, null);
+    }
+
+    private void updateSpeedAndDistance(Location newLocation) {
+        if (locationHistory.size() > 0) {
+            Location lastLocation = locationHistory.get(locationHistory.size() - 1);
+            float distance = lastLocation.distanceTo(newLocation); // metry
+            totalDistanceMeters += distance;
+
+            float speedMps = newLocation.getSpeed(); // m/s
+            float speedKmh = speedMps * 3.6f;
+
+            // Prosty model kalorii: 60 kcal na 1 km (dla osoby ~70kg)
+            totalCalories = (totalDistanceMeters / 1000f) * 60f;
+
+            runOnUiThread(() -> {
+                speedTv.setText(String.format("%.1f", speedKmh));
+                distanceTv.setText(String.format("%.2f", totalDistanceMeters / 1000f)); // km
+                caloriesTv.setText(String.format("%.0f", totalCalories));
+            });
+        }
+        locationHistory.add(newLocation);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (fusedLocationClient != null && locationCallback != null) {
+            fusedLocationClient.removeLocationUpdates(locationCallback);
+        }
+        super.onDestroy();
+    }
 
 
 
