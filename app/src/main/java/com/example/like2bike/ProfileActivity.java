@@ -32,8 +32,8 @@ public class ProfileActivity extends AppCompatActivity {
     private static final String KEY_LASTNAME = "Lastname";
 
     private SharedPreferences sharedPreferences;
-    private static final String PREFS_NAME = "TrustedNumbersPrefs";
-    private static final String KEY_NUMBERS = "TrustedNumbersSet";
+    private static final String PREFS_NAME = "user_profile";
+    private static final String KEY_NUMBERS = "emergency_contacts";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -47,9 +47,10 @@ public class ProfileActivity extends AppCompatActivity {
 
         // Dane przykładowe
         sharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        SharedPreferences prefs = getSharedPreferences("UserPrefs", MODE_PRIVATE);
+
         firstNameText.setText(sharedPreferences.getString(KEY_FIRSTNAME, ""));
         lastNameText.setText(sharedPreferences.getString(KEY_LASTNAME, ""));
+
         FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
         FirebaseFirestore db = FirebaseFirestore.getInstance();
         if (currentUser != null) {

@@ -1,8 +1,10 @@
 package com.example.like2bike;
 
 import android.Manifest;
+import android.app.AlertDialog;
 import android.bluetooth.BluetoothGattDescriptor;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.os.Bundle;
@@ -22,6 +24,8 @@ import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanResult;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 
@@ -42,6 +46,10 @@ import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.Priority;
 import com.google.android.material.navigation.NavigationView;
 import com.google.firebase.auth.FirebaseAuth;
+
+import android.telephony.SmsManager;
+import android.os.Handler;
+import android.os.Looper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -66,6 +74,10 @@ public class MainActivity extends AppCompatActivity
     private float totalDistanceMeters = 0;
     private float totalCalories = 0;
     private float lastSpeed = 0;
+    private boolean waitingForAccidentConfirmation = false;
+    private long accidentTriggerTime = 0;
+    private Handler accidentHandler = new Handler(Looper.getMainLooper());
+    private Runnable sendSmsRunnable;
 
     private FirebaseAuth auth;
 
@@ -122,10 +134,8 @@ public class MainActivity extends AppCompatActivity
                 gatt.writeDescriptor(descriptor);
             }
         }
-        BluetoothGattCallback callback = BleManager.getInstance().getGattCallback();
-        if (callback != null && gatt != null) {
-            // Połączenie jest już aktywne, nie trzeba się łączyć ponownie
-            Log.d("BLE", "Callback już ustawiony.");
+        if (BleManager.getInstance().getGatt() != null && BleManager.getInstance().getGattCallback() != null) {
+            Log.d("BLE", "Połączenie BLE już aktywne.");
         }
     }
 
@@ -329,10 +339,15 @@ public class MainActivity extends AppCompatActivity
             }
         }
 
+        @RequiresPermission(allOf = {Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION})
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             String value = characteristic.getStringValue(0);
             runOnUiThread(() -> {
+                if (value.contains("POTENCJALNY_WYPADEK")) {
+                    showAccidentDialog();
+                    return;
+                }
                 if (value.contains("Prędkość")) {
                     // Parsowanie liczby z tekstu np. "Prędkość średnia: 3.25 m/s"
                     String[] parts = value.split(":");
@@ -425,6 +440,78 @@ public class MainActivity extends AppCompatActivity
         super.onDestroy();
     }
 
+    @RequiresPermission(allOf = {Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION})
+    private void showAccidentDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Czy doszło do wypadku?");
+        builder.setMessage("Wykryto potencjalny wypadek. Czy wszystko w porządku?");
 
+        builder.setPositiveButton("Tak", (dialog, which) -> {
+            accidentHandler.removeCallbacks(sendSmsRunnable); // usuwamy automatyczne wywołanie
+            sendEmergencySms();
+        });
+
+        builder.setNegativeButton("Nie", (dialog, which) -> {
+            accidentHandler.removeCallbacks(sendSmsRunnable);
+            dialog.dismiss();
+        });
+
+        AlertDialog dialog = builder.create();
+        dialog.setCancelable(false); // użytkownik nie może po prostu zamknąć
+        dialog.show();
+
+        // Automatyczne wysłanie SMS po 2 minutach
+        sendSmsRunnable = () -> {
+            if (dialog.isShowing()) {
+                dialog.dismiss();
+                sendEmergencySms();
+            }
+        };
+        accidentHandler.postDelayed(sendSmsRunnable, 2 * 60 * 1000); // 2 minuty
+    }
+
+    @RequiresPermission(allOf = {Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION})
+    private void sendEmergencySms() {
+        fusedLocationClient.getLastLocation().addOnSuccessListener(location -> {
+            String message;
+            if (location != null) {
+                message = "Miałem wypadek, lokalizacja: https://maps.google.com/?q=" +
+                        location.getLatitude() + "," + location.getLongitude();
+            } else {
+                message = "Miałem wypadek, lokalizacja niedostępna.";
+            }
+
+            SharedPreferences prefs = getSharedPreferences("user_profile", MODE_PRIVATE);
+            Set<String> contacts = prefs.getStringSet("emergency_contacts", new HashSet<>());
+
+            if (contacts.isEmpty()) {
+                Toast.makeText(this, "Brak zaufanych kontaktów do wysłania SMS", Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            SmsManager smsManager = SmsManager.getDefault();
+            for (String number : contacts) {
+                try {
+                    smsManager.sendTextMessage(number, null, message, null, null);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    Toast.makeText(this, "Błąd wysyłania SMS do " + number, Toast.LENGTH_SHORT).show();
+                }
+            }
+
+            Toast.makeText(this, "Wysłano wiadomości alarmowe", Toast.LENGTH_LONG).show();
+        });
+    }
+
+    @RequiresPermission(allOf = {Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION})
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent); // aktualizuje intent używany przez getIntent()
+
+        if (intent.getBooleanExtra("SHOW_ACCIDENT_DIALOG", false)) {
+            showAccidentDialog();
+        }
+    }
 
 }

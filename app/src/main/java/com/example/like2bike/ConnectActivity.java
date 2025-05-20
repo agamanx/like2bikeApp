@@ -3,6 +3,7 @@ package com.example.like2bike;
 import android.Manifest;
 import android.bluetooth.*;
 import android.bluetooth.le.*;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -149,7 +150,16 @@ public class ConnectActivity extends AppCompatActivity {
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             String value = characteristic.getStringValue(0);
-            runOnUiThread(() -> Toast.makeText(ConnectActivity.this, "Odebrano: " + value, Toast.LENGTH_SHORT).show());
+            runOnUiThread(() -> {
+                Toast.makeText(ConnectActivity.this, "Odebrano: " + value, Toast.LENGTH_SHORT).show();
+
+                if ("POTENCJALNY_WYPADEK".equals(value)) {
+                    Intent intent = new Intent(ConnectActivity.this, MainActivity.class);
+                    intent.putExtra("SHOW_ACCIDENT_DIALOG", true);
+                    intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                    startActivity(intent);
+                }
+            });
         }
     };
 
