@@ -2,31 +2,18 @@ package com.example.like2bike;
 
 import android.Manifest;
 import android.app.AlertDialog;
-import android.bluetooth.BluetoothGattDescriptor;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.MenuItem;
 import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothGatt;
-import android.bluetooth.BluetoothGattCallback;
-import android.bluetooth.BluetoothGattCharacteristic;
-import android.bluetooth.BluetoothGattService;
-import android.bluetooth.BluetoothManager;
-import android.bluetooth.le.ScanCallback;
-import android.bluetooth.le.ScanResult;
-
 import java.util.HashSet;
 import java.util.Set;
-import java.util.UUID;
 
 
 import androidx.annotation.NonNull;
@@ -57,14 +44,11 @@ import java.util.List;
 public class MainActivity extends AppCompatActivity
         implements NavigationView.OnNavigationItemSelectedListener {
 
-    private BluetoothAdapter bluetoothAdapter;
 
     private FusedLocationProviderClient fusedLocationClient;
     private LocationCallback locationCallback;
     private List<Location> locationHistory = new ArrayList<>();
 
-    private final UUID SERVICE_UUID = UUID.fromString("12345678-1234-1234-1234-123456789abc");
-    private final UUID CHARACTERISTIC_UUID = UUID.fromString("0000abcd-0000-1000-8000-00805f9b34fb");
     private DrawerLayout drawerLayout;
     private NavigationView navigationView;
     private ImageButton menuButton, leftSignal, rightSignal, emergency;
@@ -100,8 +84,6 @@ public class MainActivity extends AppCompatActivity
         distanceTv     = findViewById(R.id.distance_value);
         caloriesTv     = findViewById(R.id.calories_value);
 
-        initBLE();
-
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
         startLocationUpdates();
 
@@ -122,21 +104,6 @@ public class MainActivity extends AppCompatActivity
         speedTv.setText("0");
         distanceTv.setText("0");
         caloriesTv.setText("0");
-
-        BluetoothGatt gatt = BleManager.getInstance().getGatt();
-        BluetoothGattCharacteristic chara = BleManager.getInstance().getWriteCharacteristic();
-
-        if (gatt != null && chara != null) {
-            gatt.setCharacteristicNotification(chara, true);
-            BluetoothGattDescriptor descriptor = chara.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"));
-            if (descriptor != null) {
-                descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                gatt.writeDescriptor(descriptor);
-            }
-        }
-        if (BleManager.getInstance().getGatt() != null && BleManager.getInstance().getGattCallback() != null) {
-            Log.d("BLE", "Połączenie BLE już aktywne.");
-        }
     }
 
     @Override
@@ -258,132 +225,6 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
-    private void initBLE() {
-        // Sprawdzanie uprawnień przed rozpoczęciem skanowania
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
-                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-
-            // Jeśli uprawnienia nie zostały przyznane, zapisz to w logu lub wyświetl komunikat
-            Toast.makeText(this, "Brak uprawnień do skanowania urządzeń Bluetooth", Toast.LENGTH_SHORT).show();
-            return; // Przerwij działanie metody, jeśli brak uprawnień
-        }
-
-        BluetoothManager bluetoothManager = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
-        bluetoothAdapter = bluetoothManager.getAdapter();
-
-        if (bluetoothAdapter != null && bluetoothAdapter.isEnabled()) {
-            bluetoothAdapter.getBluetoothLeScanner().startScan(scanCallback);
-        } else {
-            Toast.makeText(this, "Bluetooth wyłączony", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private final ScanCallback scanCallback = new ScanCallback() {
-        @Override
-        public void onScanResult(int callbackType, ScanResult result) {
-            BluetoothDevice device = result.getDevice();
-
-            // Sprawdzamy uprawnienia przed uzyskaniem dostępu do nazwy urządzenia
-            if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(MainActivity.this, "Brak uprawnień do połączenia z urządzeniem Bluetooth", Toast.LENGTH_SHORT).show();
-                return; // Przerywamy działanie, jeśli brak uprawnień
-            }
-
-            if (device.getName() != null && device.getName().contains("ESP32_Module")) {
-                // Sprawdzamy uprawnienia przed połączeniem
-                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                    Toast.makeText(MainActivity.this, "Brak uprawnień do połączenia z urządzeniem Bluetooth", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-
-                bluetoothAdapter.getBluetoothLeScanner().stopScan(this);
-
-                // Sprawdzamy uprawnienia przed połączeniem z urządzeniem
-                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                    Toast.makeText(MainActivity.this, "Brak uprawnień do połączenia Bluetooth", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-
-                device.connectGatt(MainActivity.this, false, gattCallback);
-            }
-        }
-    };
-
-    private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
-        @Override
-        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-            if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
-                // Sprawdzamy uprawnienia przed wywołaniem discoverServices
-                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                    Toast.makeText(MainActivity.this, "Brak uprawnień do komunikacji z urządzeniem Bluetooth", Toast.LENGTH_SHORT).show();
-                    return; // Przerywamy operację, jeśli brak uprawnień
-                }
-
-                gatt.discoverServices();
-            }
-        }
-
-        @Override
-        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
-            BluetoothGattService service = gatt.getService(SERVICE_UUID);
-            if (service != null) {
-                BluetoothGattCharacteristic characteristic = service.getCharacteristic(CHARACTERISTIC_UUID);
-
-                // Sprawdzamy uprawnienia przed ustawieniem powiadomienia
-                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                    Toast.makeText(MainActivity.this, "Brak uprawnień do ustawiania powiadomień Bluetooth", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-
-                gatt.setCharacteristicNotification(characteristic, true);
-            }
-        }
-
-        @RequiresPermission(allOf = {Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION})
-        @Override
-        public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-            String value = characteristic.getStringValue(0);
-            runOnUiThread(() -> {
-                if (value.contains("POTENCJALNY_WYPADEK")) {
-                    showAccidentDialog();
-                    return;
-                }
-                if (value.contains("Prędkość")) {
-                    // Parsowanie liczby z tekstu np. "Prędkość średnia: 3.25 m/s"
-                    String[] parts = value.split(":");
-                    if (parts.length > 1) {
-                        String speedStr = parts[1].replaceAll("[^0-9.,]", "").replace(",", ".").trim();
-                        try {
-                            float currentSpeed = Float.parseFloat(speedStr);
-                            speedTv.setText(String.format("%.2f", currentSpeed));
-
-                            // Czas od ostatniego odczytu
-                            long currentTime = System.currentTimeMillis();
-                            if (lastSpeedUpdateTime != 0) {
-                                float deltaTimeSec = (currentTime - lastSpeedUpdateTime) / 1000f;
-
-                                // Oblicz dystans (v * t)
-                                totalDistanceMeters += currentSpeed * deltaTimeSec;
-
-                                // Prosta kalkulacja kalorii: 0.2 kcal na 1 metr przy 3 m/s (~10.8 km/h)
-                                totalCalories += (0.2f * currentSpeed * deltaTimeSec);  // możesz to dostroić
-                            }
-
-                            lastSpeedUpdateTime = currentTime;
-                            lastSpeed = currentSpeed;
-
-                            distanceTv.setText(String.format("%.2f", totalDistanceMeters / 1000)); // w km
-                            caloriesTv.setText(String.format("%.0f", totalCalories)); // zaokrąglone
-
-                        } catch (NumberFormatException e) {
-                            e.printStackTrace();
-                        }
-                    }
-                }
-            });
-        }
-    };
-
     private void startLocationUpdates() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this,
@@ -493,6 +334,7 @@ public class MainActivity extends AppCompatActivity
             for (String number : contacts) {
                 try {
                     smsManager.sendTextMessage(number, null, message, null, null);
+                    Toast.makeText(this, "Wyslano SMS do: "+number+" o tresci:"+message, Toast.LENGTH_SHORT).show();
                 } catch (Exception e) {
                     e.printStackTrace();
                     Toast.makeText(this, "Błąd wysyłania SMS do " + number, Toast.LENGTH_SHORT).show();
